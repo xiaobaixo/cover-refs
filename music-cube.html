@@ -1,0 +1,120 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Orbit</title><style>
+* { box-sizing: border-box; }
+html, body { margin: 0; overflow: hidden; background: #000; }
+main { position: relative; margin: auto; width: 100%; height: 100vh; height: 100dvh; }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+canvas:active { cursor: grabbing; }
+@media (min-width: 650px) and (pointer: fine) {
+  body { background: #111; }
+  main { width: min(100%, 780px, 46.21vh); width: min(100%, 780px, 46.21dvh); background: #000; }
+}
+</style><main><canvas width="780" height="1688" tabindex="0" aria-label="彩色圆点：环绕滑动旋转，来回滑动弹动，点按放大，长按持续放大">交互圆点</canvas></main><script>
+const points = [
+  [800,138,8,'b'],[836,139,8,'r'],[895,145,32,'b'],[964,159,20,'y'],[617,164,32,'y'],
+  [1032,180,32,'b'],[550,187,20,'g'],[496,211,20,'b'],[435,247,32,'r'],[1204,274,20,'r'],
+  [387,281,8,'b'],[1241,304,8,'g'],[342,320,32,'y'],[1275,336,20,'y'],[1323,389,32,'r'],
+  [1370,457,32,'b'],[226,464,8,'b'],[204,506,20,'g'],[1409,530,32,'y'],[184,548,8,'r'],
+  [1431,584,8,'r'],[163,604,32,'b'],[146,672,20,'y'],[135,742,32,'r'],[1468,766,32,'b'],
+  [1469,825,8,'r'],[1465,884,32,'g'],[145,939,20,'y'],[1453,953,20,'y'],[162,1007,32,'r'],
+  [1438,1010,20,'b'],[1422,1055,8,'g'],[192,1085,32,'g'],[231,1157,32,'b'],[1337,1206,20,'r'],
+  [271,1216,20,'y'],[1307,1243,8,'g'],[317,1269,32,'g'],[1267,1286,32,'r'],[369,1318,20,'r'],
+  [1214,1333,20,'g'],[1156,1374,32,'y'],[1083,1413,32,'g'],[536,1421,32,'y'],[1007,1443,32,'r'],
+  [603,1446,20,'r'],[648,1458,8,'b'],[683,1465,8,'r'],[730,1472,20,'b'],[800,1477,32,'g']
+];
+
+const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d');
+const colors={b:'#95D4EB',r:'#FF5D5D',y:'#FFB95D',g:'#A382FF'};
+const pinks=['#FFCAFC','#FF91F9'];
+const dots=points.map(([x,y,r,c],i)=>({a:Math.atan2(y-805,x-800),d:Math.hypot(x-800,y-805)*.49,r:r*.49,c:(i%7===0?pinks[0]:i%7===3?pinks[1]:colors[c]),size:r*.49,dx:0,dy:0,vx:0,vy:0,light:0,pulse:0}));
+const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+let rotation=0,momentum=0,pointer=null,previous=0,trail=[],keyIndex=0;
+let zoom=0,zoomTarget=0,pinch=null;
+const contacts=new Map();
+function viewport() {
+ const bounds = canvas.getBoundingClientRect();
+ const scale = Math.min(bounds.width, bounds.height) / 780 || 1;
+ return { bounds, scale, left: (bounds.width - 780 * scale) / 2, top: bounds.height / 2 - 390 * scale };
+}
+function rawPoint(event) {
+ const { bounds, scale, left, top } = viewport();
+ return { x: (event.clientX - bounds.left - left) / scale, y: (event.clientY - bounds.top - top) / scale };
+}
+function zoomView(){return {scale:1+zoom*.72,cx:390+zoom*345,cy:390}}
+function contactDistance(){const a=[...contacts.values()];return Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)}
+canvas.addEventListener('pointerdown',e=>{
+ contacts.set(e.pointerId,rawPoint(e));canvas.setPointerCapture(e.pointerId);
+ if(contacts.size===2){pinch={distance:contactDistance(),start:zoomTarget};pointer=null;momentum=0}
+},true);
+canvas.addEventListener('pointermove',e=>{
+ if(contacts.has(e.pointerId))contacts.set(e.pointerId,rawPoint(e));
+ if(pinch&&contacts.size>=2){zoomTarget=Math.max(0,Math.min(1,pinch.start+(contactDistance()-pinch.distance)/160));e.stopImmediatePropagation()}
+},true);
+function releaseContact(e){contacts.delete(e.pointerId);if(pinch){if(contacts.size<2){pinch=null;zoomTarget=zoomTarget>.45?1:0}pointer=null;e.stopImmediatePropagation()}}
+canvas.addEventListener('pointerup',releaseContact,true);
+canvas.addEventListener('pointercancel',releaseContact,true);
+canvas.addEventListener('wheel',e=>{e.preventDefault();zoomTarget=Math.max(0,Math.min(1,zoomTarget-e.deltaY*.004))},{passive:false});
+canvas.addEventListener('dblclick',e=>{if(Math.hypot(point(e).x-390,point(e).y-390)<125)zoomTarget=zoomTarget>.5?0:1});
+function pos(d){return{x:390+Math.cos(d.a+rotation)*d.d+d.dx,y:390+Math.sin(d.a+rotation)*d.d+d.dy}}
+function circle(x,y,r){ctx.beginPath();ctx.arc(x,y,Math.max(.1,r),0,Math.PI*2)}
+function point(e){const p=rawPoint(e),v=zoomView();return{x:390+(p.x-v.cx)/v.scale,y:390+(p.y-v.cy)/v.scale}}
+function nearest(p){let best=null,gap=30;for(const d of dots){const q=pos(d),v=Math.hypot(p.x-q.x,p.y-q.y)-d.size;if(v<gap){gap=v;best=d}}return best}
+function angle(p){return Math.atan2(p.y-390,p.x-390)}
+function draw(now){
+ const dt=Math.min(2,(now-previous)/16.667||1);previous=now;
+ if(!pointer){rotation+=momentum*dt;momentum*=Math.pow(.94,dt)}
+ const { bounds, scale, left, top } = viewport();
+ const pixelRatio = window.devicePixelRatio || 1;
+ const width = Math.max(1, Math.round(bounds.width * pixelRatio));
+ const height = Math.max(1, Math.round(bounds.height * pixelRatio));
+ if (canvas.width !== width) canvas.width = width;
+ if (canvas.height !== height) canvas.height = height;
+ ctx.setTransform(1, 0, 0, 1, 0, 0);
+ ctx.clearRect(0, 0, width, height);
+ ctx.setTransform(pixelRatio * scale, 0, 0, pixelRatio * scale, pixelRatio * left, pixelRatio * top);
+ zoom+=(zoomTarget-zoom)*(1-Math.pow(.88,dt));
+ const view=zoomView();ctx.save();ctx.translate(view.cx,view.cy);ctx.scale(view.scale,view.scale);ctx.translate(-390,-390);
+ const energy=Math.min(1,dots.reduce((a,d)=>a+d.light,0)/12);
+ const g=ctx.createRadialGradient(390,390,0,390,390,116+energy*5);
+ [[0,'#020202'],[.5,'#080808'],[.78,'#303030'],[.91,'#777777'],[.97,'#FFFFFF'],[1,'#000000']].forEach(([s,c])=>g.addColorStop(s,c));
+ circle(390,390,116+energy*5);ctx.fillStyle=g;ctx.fill();
+ trail=trail.filter(t=>now-t.at<650);
+ for(let i=1;i<trail.length;i++){const t=trail[i],alpha=Math.pow(1-(now-t.at)/650,2)*.48;ctx.beginPath();ctx.moveTo(trail[i-1].x,trail[i-1].y);ctx.lineTo(t.x,t.y);ctx.strokeStyle=`rgba(149,212,235,${alpha})`;ctx.lineWidth=3;ctx.lineCap='round';ctx.shadowColor='#95D4EB';ctx.shadowBlur=18;ctx.stroke()}ctx.shadowBlur=0;
+ for(const d of dots){
+  const held=pointer&&!pointer.moved&&pointer.dot===d&&now-pointer.began>280;
+  if(held){pointer.held=true;d.pulse=Math.min(1,(now-pointer.began-280)/1050);d.light=Math.max(d.light,.8)}
+  else d.pulse*=Math.pow(.965,dt);
+  const target=d.r+(50-d.r)*d.pulse;
+  d.size+=(target-d.size)*(1-Math.pow(.77,dt));
+  d.vx=(d.vx-d.dx*.075*dt)*Math.pow(.8,dt);d.vy=(d.vy-d.dy*.075*dt)*Math.pow(.8,dt);d.dx+=d.vx*dt;d.dy+=d.vy*dt;
+  d.light*=Math.pow(.955,dt);
+  const p=pos(d),radius=Math.min(50,d.size+Math.min(5,d.light*4));
+  if(d.light>.005){const halo=ctx.createRadialGradient(p.x,p.y,radius*.4,p.x,p.y,radius+30);halo.addColorStop(0,d.c+'88');halo.addColorStop(1,d.c+'00');ctx.globalAlpha=Math.min(1,d.light);ctx.fillStyle=halo;circle(p.x,p.y,radius+30);ctx.fill();ctx.globalAlpha=1}
+  ctx.shadowColor=d.c;ctx.shadowBlur=reduced?0:22*d.light;ctx.fillStyle=d.c;circle(p.x,p.y,radius);ctx.fill();ctx.shadowBlur=0;
+ }
+ ctx.restore();
+ requestAnimationFrame(draw);
+}
+canvas.addEventListener('pointerdown',e=>{if(pointer||pinch||contacts.size>1||e.button!==0)return;const p=point(e);canvas.setPointerCapture(e.pointerId);pointer={id:e.pointerId,start:p,last:p,began:performance.now(),at:performance.now(),dot:nearest(p),moved:false,held:false,mode:'pending',travel:0,turn:0,oldDx:0,oldDy:0};momentum=0});
+canvas.addEventListener('pointermove',e=>{
+ if(pointer?.id!==e.pointerId)return;
+ const p=point(e),t=performance.now(),dx=p.x-pointer.last.x,dy=p.y-pointer.last.y,speed=Math.hypot(dx,dy);
+ if(Math.hypot(p.x-pointer.start.x,p.y-pointer.start.y)>9)pointer.moved=true;
+ if(!pointer.moved)return;
+ const delta=angle(p)-angle(pointer.last),turn=Math.atan2(Math.sin(delta),Math.cos(delta));
+ pointer.travel+=speed;pointer.turn+=turn;
+ const radial=Math.abs(Math.hypot(p.x-390,p.y-390)-Math.hypot(pointer.last.x-390,pointer.last.y-390));
+ const reversed=dx*pointer.oldDx+dy*pointer.oldDy< -3;
+ if(reversed)pointer.mode='scratch';
+ else if(pointer.mode==='pending'&&pointer.travel>12)pointer.mode=radial<speed*.6?'jog':'scratch';
+ if(pointer.mode==='jog'){rotation+=turn;momentum=reduced?0:Math.max(-.07,Math.min(.07,turn*16/Math.max(8,t-pointer.at)))}
+ for(const d of dots){const q=pos(d),near=Math.max(0,1-Math.hypot(q.x-p.x,q.y-p.y)/150);
+ d.light=Math.min(1.5,d.light+near*.5+(pointer.mode==='jog'?.035:0));
+ if(pointer.mode==='scratch'){d.vx+=Math.max(-14,Math.min(14,dx*.6))*near;d.vy+=Math.max(-14,Math.min(14,dy*.6))*near;d.pulse=Math.max(d.pulse,near*.3)}
+ }
+ trail.push({...p,at:t});if(speed>2){pointer.oldDx=dx;pointer.oldDy=dy}pointer.last=p;pointer.at=t;
+});
+function finish(e,cancel=false){if(pointer?.id!==e.pointerId)return;if(!cancel&&!pointer.moved&&!pointer.held&&pointer.dot){pointer.dot.pulse=1;pointer.dot.light=1.5}if(cancel||performance.now()-pointer.at>100)momentum=0;pointer=null}
+canvas.addEventListener('pointerup',e=>finish(e));canvas.addEventListener('pointercancel',e=>finish(e,true));canvas.addEventListener('lostpointercapture',e=>finish(e,true));
+canvas.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Enter',' '].includes(e.key)){e.preventDefault();if(e.key.startsWith('Arrow')){rotation+=e.key==='ArrowLeft'?-.1:.1;keyIndex=(keyIndex+1)%dots.length}else{dots[keyIndex].pulse=1;dots[keyIndex].light=1.5}}});
+requestAnimationFrame(draw);
+</script></html>
